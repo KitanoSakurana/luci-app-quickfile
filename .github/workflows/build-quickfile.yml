@@ -8,35 +8,32 @@ jobs:
     runs-on: ubuntu-22.04
 
     env:
-      # 链接已严格替换为你提供的列表中的 .tar.zst 后缀文件
       SDK_URL: "https://downloads.immortalwrt.org/releases/24.10.5/targets/mediatek/filogic/immortalwrt-sdk-24.10.5-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
-      PKG_REPO: "https://github.com/sbwml/luci-app-quickfile.git"
 
     steps:
     - name: 检出当前仓库代码
       uses: actions/checkout@v4
 
-    - name: 初始化编译环境 (增加 zstd 支持)
+    - name: 初始化编译环境
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
         sudo apt-get update -y
-        # 这里特别加入了 zstd 用于解压新的 SDK 格式
         sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
         gettext git libncurses5-dev libssl-dev python3-distutils rsync unzip zlib1g-dev file wget curl zstd
 
     - name: 下载并解压 ImmortalWrt SDK
       run: |
-        # 保存为 .tar.zst
         wget -O sdk.tar.zst ${{ env.SDK_URL }}
         mkdir sdk
-        # 调用 zstd 进行解压
-        tar -I zstd -xf sdk.tar.zst -C sdk --strip-components=1
+        # Ubuntu 22.04 的 tar 原生支持自动识别解压 zstd，命令可精简
+        tar -xf sdk.tar.zst -C sdk --strip-components=1
         rm sdk.tar.zst
 
     - name: 拉取 quickfile 插件源码
       working-directory: ./sdk
       run: |
+        # 直接克隆到 package 目录下
         git clone https://github.com/sbwml/luci-app-quickfile.git package/luci-app-quickfile
 
     - name: 更新并安装 Feeds
@@ -45,26 +42,36 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: 自动生成 .config 配置文件
+    - name: 生成配置文件 (.config)
       working-directory: ./sdk
       run: |
-        make defconfig
+        rm -f .config
+        # 强制将核心程序、控制面板和中文语言包全部加入编译列表（=m 代表编译为独立 ipk）
+        echo "CONFIG_PACKAGE_quickfile=m" >> .config
         echo "CONFIG_PACKAGE_luci-app-quickfile=m" >> .config
         echo "CONFIG_PACKAGE_luci-i18n-quickfile-zh-cn=m" >> .config
         make defconfig
 
+    - name: 预下载依赖源码
+      working-directory: ./sdk
+      run: |
+        # 提前下载所有需要的依赖包源码，防止编译时因网络波动中断
+        make download -j8
+
     - name: 编译插件
       working-directory: ./sdk
       run: |
+        # V=s 输出详细日志，方便万一出错时排查
         make package/luci-app-quickfile/compile V=s
 
     - name: 收集生成的 .ipk 文件
       run: |
         mkdir -p ./artifact
-        find ./sdk/bin/ -name "*.ipk" -exec cp {} ./artifact/ \;
+        # 查找所有生成的 ipk 文件（包括 quickfile, luci 界面，以及可能触发编译的 luci-nginx）
+        find ./sdk/bin/ -type f -name "*.ipk" -exec cp {} ./artifact/ \;
 
     - name: 上传编译结果
       uses: actions/upload-artifact@v4
       with:
-        name: luci-app-quickfile-MT7981
+        name: luci-app-quickfile-MT7981-ImmortalWrt-24.10.5
         path: ./artifact/*.ipk
