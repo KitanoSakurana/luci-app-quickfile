@@ -67,8 +67,8 @@ jobs:
     - name: 收集生成的 .ipk 文件
       run: |
         mkdir -p ./artifact
-        # 查找所有生成的 ipk 文件（包括 quickfile, luci 界面，以及可能触发编译的 luci-nginx）
-        find ./sdk/bin/ -type f -name "*.ipk" -exec cp {} ./artifact/ \;
+        # 精准匹配：只抓取文件名包含 quickfile 的包，过滤掉所有无关组件
+        find ./sdk/bin/ -type f -name "*quickfile*.ipk" -exec cp {} ./artifact/ \;
 
     - name: 上传编译结果
       uses: actions/upload-artifact@v4
